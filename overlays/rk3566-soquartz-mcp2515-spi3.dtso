@@ -1,0 +1,37 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * SOQuartz Model A: enable SPI3 (M0 pins) and expose CS0 to spigen(4) for the
+ * MCP2515 userspace bring-up tool (mcp2515/mcp2515_spigen.c).
+ *
+ * SPI3 M0 pinmux (already the spi3 default pinctrl-0 in rk356x.dtsi) matches the
+ * wiring:  CLK=GPIO4_B3  MISO=GPIO4_B0  MOSI=GPIO4_B2  CS0=GPIO4_A6.
+ * (MCP2515 INT -> GPIO4_B1 is not needed by the spigen tool; it's for the
+ *  future in-kernel driver.)
+ *
+ * Uses target-path (not &label) so it applies to a base DTB without __symbols__.
+ *
+ * Build on the board:
+ *   dtc -I dts -O dtb -o /boot/dtb/overlays/rk3566-soquartz-mcp2515-spi3.dtbo \
+ *       rk3566-soquartz-mcp2515-spi3.dtso
+ * Then in /boot/loader.conf:
+ *   fdt_overlays="rk3566-soquartz-mcp2515-spi3.dtbo"
+ *   spigen_load="YES"
+ * Reboot; expect /dev/spigenN.0 (N = spibus unit; check `ls /dev/spigen*`).
+ */
+
+/ {
+	fragment@0 {
+		target-path = "/spi@fe640000";	/* spi3 */
+		__overlay__ {
+			status = "okay";
+
+			spigen@0 {
+				compatible = "freebsd,spigen";
+				reg = <0>;			/* native CS0 */
+				spi-max-frequency = <10000000>;	/* MCP2515 max 10 MHz */
+			};
+		};
+	};
+};

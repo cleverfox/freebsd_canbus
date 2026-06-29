@@ -1,0 +1,12 @@
+U-Boot loader and related files for the Pine64 SOQuartz (RK3566) on the
+Model A carrier board.
+
+Built from the mainline U-Boot soquartz-model-a-rk3566_defconfig, so U-Boot
+uses the rk3566-soquartz-model-a device tree for hardware bring-up (DRAM, MMC,
+regulators, GMAC) instead of the quartz64-a tree, which resets at GMAC/Net init
+on this board.
+
+To install this bootloader on an sdcard just do:
+
+dd if=/usr/local/share/u-boot/u-boot-soquartz-model-a/idbloader.img of=/path/to/sdcarddevice seek=64 bs=512 conv=sync
+dd if=/usr/local/share/u-boot/u-boot-soquartz-model-a/u-boot.itb of=/path/to/sdcarddevice seek=16384 bs=512 conv=sync

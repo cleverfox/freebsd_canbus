@@ -1,0 +1,12 @@
+diff --git a/sys/modules/dtb/rockchip/Makefile b/sys/modules/dtb/rockchip/Makefile
+index 407d054a1..3d3d7a3c9 100644
+--- a/sys/modules/dtb/rockchip/Makefile
++++ b/sys/modules/dtb/rockchip/Makefile
+@@ -19,6 +19,7 @@ DTS=	\
+ 	rockchip/rk3399-firefly.dts \
+ 	rockchip/rk3399-rockpro64.dts \
+ 	rockchip/rk3566-quartz64-a.dts \
++	rockchip/rk3566-soquartz-model-a.dts \
+ 	rockchip/rk3568-nanopi-r5s.dts \
+ 	rockchip/rk3566-radxa-zero-3e.dts \
+ 	rockchip/rk3566-radxa-zero-3w.dts \

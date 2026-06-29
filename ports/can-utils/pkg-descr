@@ -1,0 +1,10 @@
+can-utils is the SocketCAN userspace toolset (candump, cansend, cangen,
+canplayer, canbusload, canfdtest, asc2log, log2asc, canerrsim).
+
+This is a FreeBSD port of github.com/linux-can/can-utils, adapted to build and
+run against this project's in-kernel netcan (PF_CAN / AF_CAN, CAN_RAW + vcan)
+stack. The Linux<->BSD differences are bridged by a small compat/ shim
+(sockaddr_can BSD layout, <linux/*> header shims, SIOCGIFNAME -> if_indextoname,
+Linux-only socket options stubbed). Only the RAW-CAN tools are built; the ISOTP,
+J1939, BCM, gateway and slcan-line-discipline tools need kernel features not
+present on FreeBSD and are omitted.

@@ -1,0 +1,45 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * SOQuartz Model A: MCP2515 (classic CAN, SPI) on SPI3 CS0, for the in-kernel
+ * mcp2515(4) driver -> creates a canN interface.
+ *
+ * Wiring (M0 pinmux, = spi3 default pinctrl):
+ *   CLK=GPIO4_B3  MISO=GPIO4_B0  MOSI=GPIO4_B2  CS0=GPIO4_A6  INT=GPIO4_B1
+ *
+ * This is the DRIVER overlay; do NOT load it together with the spigen overlay
+ * (both claim SPI3 CS0). Use one or the other:
+ *   - spigen overlay  -> /dev/spigenN.0 for the userspace mcp2515 tool
+ *   - this overlay    -> kernel mcp2515(4) -> canN interface
+ *
+ * Label-based (&spi3 / &gpio4) -- FreeBSD builds DTBs with `dtc -@`, so the
+ * loader resolves these against the base DTB's __symbols__. Raw cell values are
+ * used (no dt-bindings headers needed to compile on the board):
+ *   interrupts = <9 8> => pin RK_PB1 (bank-relative 8+1), IRQ_TYPE_LEVEL_LOW(8)
+ *   gpio4 #interrupt-cells = <2>.
+ *
+ * Build on the board:
+ *   dtc -@ -I dts -O dtb \
+ *       -o /boot/dtb/overlays/rk3566-soquartz-mcp2515-can.dtbo \
+ *       rk3566-soquartz-mcp2515-can.dtso
+ * loader.conf:
+ *   fdt_overlays="rk3566-soquartz-mcp2515-can.dtbo"
+ *   mcp2515_load="YES"
+ *   can_load="YES"
+ */
+
+&spi3 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	mcp2515@0 {
+		compatible = "microchip,mcp2515";
+		reg = <0>;				/* CS0 */
+		spi-max-frequency = <10000000>;		/* MCP2515 SPI max 10 MHz */
+		interrupt-parent = <&gpio4>;
+		interrupts = <9 8>;			/* GPIO4_B1, level-low */
+		clock-frequency = <8000000>;		/* 8 MHz crystal */
+	};
+};

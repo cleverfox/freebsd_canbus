@@ -1,0 +1,23 @@
+diff --git a/sys/contrib/device-tree/src/arm64/rockchip/rk3566-soquartz-model-a.dts b/sys/contrib/device-tree/src/arm64/rockchip/rk3566-soquartz-model-a.dts
+index 2e130eef5..babec06c5 100644
+--- a/sys/contrib/device-tree/src/arm64/rockchip/rk3566-soquartz-model-a.dts
++++ b/sys/contrib/device-tree/src/arm64/rockchip/rk3566-soquartz-model-a.dts
+@@ -171,12 +171,14 @@
+ };
+ 
+ /*
+- * vmmc-supply is vcc3v3_sd on v1.0 and vcc3v0_sd on v1.1+
+- * the soquartz SoM has SDMMC_PWR (CM1 pin 75) hardwired to vcc3v3_sys,
+- * so we use vcc3v3_sd here to ensure the regulator is enabled on older boards.
++ * SDMMC_PWR (CM1 pin 75) is hardwired to vcc3v3_sys on the SoM, so the card is
++ * always powered. The PMIC vcc3v3_sd (SWITCH_REG2) is disabled in the dtsi, so
++ * referencing it as vmmc made U-Boot fail to power the card ("did not respond to
++ * voltage select"). Use the always-on fixed vcc3v0_sd (vin = vcc3v3_sys), which
++ * models the hardwired rail and works for U-Boot's strict regulator handling.
+  */
+ &sdmmc0 {
+-	vmmc-supply = <&vcc3v3_sd>;
++	vmmc-supply = <&vcc3v0_sd>;
+ 	status = "okay";
+ };
+ 

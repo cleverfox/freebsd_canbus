@@ -1,0 +1,205 @@
+--- candump.c
++++ candump.c
+@@ -109,7 +109,7 @@ struct if_info { /* bundled information per open socket */
+ static struct if_info sock_info[MAXSOCK];
+ 
+ static char *progname;
+-static char devname[MAXIFNAMES][IFNAMSIZ + 1];
++static char cu_devname[MAXIFNAMES][IFNAMSIZ + 1];
+ static int dindex[MAXIFNAMES];
+ static int max_devname_len; /* to prevent frazzled device name output */
+ static const int canfx_on = 1;
+@@ -194,7 +194,7 @@ static int idx2dindex(int ifidx, int socket)
+ 	for (i = 0; i < MAXIFNAMES; i++) {
+ 		if (dindex[i]) {
+ 			ifr.ifr_ifindex = dindex[i];
+-			if (ioctl(socket, SIOCGIFNAME, &ifr) < 0)
++			if (if_indextoname(ifr.ifr_ifindex, ifr.ifr_name) == NULL)
+ 				dindex[i] = 0;
+ 		}
+ 	}
+@@ -212,15 +212,15 @@ static int idx2dindex(int ifidx, int socket)
+ 	dindex[i] = ifidx;
+ 
+ 	ifr.ifr_ifindex = ifidx;
+-	if (ioctl(socket, SIOCGIFNAME, &ifr) < 0)
++	if (if_indextoname(ifr.ifr_ifindex, ifr.ifr_name) == NULL)
+ 		perror("SIOCGIFNAME");
+ 
+ 	if (max_devname_len < (int)strlen(ifr.ifr_name))
+ 		max_devname_len = strlen(ifr.ifr_name);
+ 
+-	strcpy(devname[i], ifr.ifr_name);
++	strcpy(cu_devname[i], ifr.ifr_name);
+ 
+-	pr_debug("new index %d (%s)\n", i, devname[i]);
++	pr_debug("new index %d (%s)\n", i, cu_devname[i]);
+ 
+ 	return i;
+ }
+@@ -774,7 +774,7 @@ int main(int argc, char **argv)
+ 
+ 			if (nbytes < 0) {
+ 				if ((errno == ENETDOWN) && !down_causes_exit) {
+-					fprintf(stderr, "%s: interface down\n", devname[idx]);
++					fprintf(stderr, "%s: interface down\n", cu_devname[idx]);
+ 					continue;
+ 				}
+ 				perror("read");
+@@ -838,11 +838,11 @@ int main(int argc, char **argv)
+ 
+ 				if (silent != SILENT_ON)
+ 					printf("DROPCOUNT: dropped %u CAN frame%s on '%s' socket (total drops %u)\n",
+-					       frames, (frames > 1)?"s":"", devname[idx], obj->dropcnt);
++					       frames, (frames > 1)?"s":"", cu_devname[idx], obj->dropcnt);
+ 
+ 				if (log)
+ 					fprintf(logfile, "DROPCOUNT: dropped %u CAN frame%s on '%s' socket (total drops %u)\n",
+-						frames, (frames > 1)?"s":"", devname[idx], obj->dropcnt);
++						frames, (frames > 1)?"s":"", cu_devname[idx], obj->dropcnt);
+ 
+ 				obj->last_dropcnt = obj->dropcnt;
+ 			}
+@@ -863,7 +863,7 @@ int main(int argc, char **argv)
+ 
+ 				alen = sprint_timestamp(afrbuf, logtimestamp, use_ns, &ts, &last_ts);
+ 
+-				alen += sprintf(afrbuf + alen, "%*s ", max_devname_len, devname[idx]);
++				alen += sprintf(afrbuf + alen, "%*s ", max_devname_len, cu_devname[idx]);
+ 
+ 				alen += snprintf_canframe(afrbuf + alen, sizeof(afrbuf) - alen, &cu, 0);
+ 			}
+@@ -892,7 +892,7 @@ int main(int argc, char **argv)
+ 			alen += sprint_timestamp(afrbuf + alen, timestamp, use_ns, &ts, &last_ts);
+ 			alen += sprintf(afrbuf + alen, " %s%*s",
+ 					(color && (color < 3)) ? col_on[idx % MAXCOL] : "",
+-					max_devname_len, devname[idx]);
++					max_devname_len, cu_devname[idx]);
+ 
+ 			if (extra_msg_info) {
+ 				if (msg.msg_flags & MSG_DONTROUTE)
+--- /dev/null
++++ compat/compat.h
+@@ -0,0 +1,43 @@
++/*
++ * FreeBSD compatibility shim for can-utils, force-included via -include.
++ * Bridges the Linux-isms the RAW CAN tools rely on.
++ */
++#ifndef _FBSD_CANUTILS_COMPAT_H_
++#define _FBSD_CANUTILS_COMPAT_H_
++
++
++#include <net/if.h>
++#include <sys/socket.h>
++
++/* Linux struct ifreq has ifr_ifindex; FreeBSD spells it ifr_index. */
++#ifndef ifr_ifindex
++#define ifr_ifindex ifr_index
++#endif
++
++/* Linux-only socket options: degrade to portable equivalents / no-ops. */
++#ifndef SO_RCVBUFFORCE
++#define SO_RCVBUFFORCE SO_RCVBUF
++#endif
++#ifndef SO_RXQ_OVFL
++#define SO_RXQ_OVFL 0x4040	/* unsupported on FreeBSD; compile-only */
++#endif
++
++#ifndef SO_TXTIME
++#define SO_TXTIME 0x4041
++#endif
++#ifndef SO_MARK
++#define SO_MARK 0x4042
++#endif
++
++#ifndef SO_PRIORITY
++#define SO_PRIORITY 0x4043
++#endif
++#ifndef SCM_TXTIME
++#define SCM_TXTIME SO_TXTIME
++#endif
++
++#ifndef MSG_CONFIRM
++#define MSG_CONFIRM 0	/* Linux send flag; no-op on FreeBSD */
++#endif
++
++#endif
+--- /dev/null
++++ compat/linux/socket.h
+@@ -0,0 +1,5 @@
++/* FreeBSD compat shim. */
++#ifndef _FBSD_COMPAT_LINUX_SOCKET_H_
++#define _FBSD_COMPAT_LINUX_SOCKET_H_
++#include <sys/socket.h>
++#endif
+--- /dev/null
++++ compat/linux/sockios.h
+@@ -0,0 +1 @@
++#include <sys/sockio.h>
+--- /dev/null
++++ compat/linux/stddef.h
+@@ -0,0 +1 @@
++#include <stddef.h>
+--- /dev/null
++++ compat/linux/types.h
+@@ -0,0 +1,18 @@
++/* FreeBSD compat shim: Linux fixed-width kernel types for can-utils. */
++#ifndef _FBSD_COMPAT_LINUX_TYPES_H_
++#define _FBSD_COMPAT_LINUX_TYPES_H_
++#include <stdint.h>
++#include <sys/types.h>
++typedef uint8_t  __u8;
++typedef uint16_t __u16;
++typedef uint32_t __u32;
++typedef uint64_t __u64;
++typedef int8_t   __s8;
++typedef int16_t  __s16;
++typedef int32_t  __s32;
++typedef int64_t  __s64;
++typedef uint16_t __le16, __be16;
++typedef uint32_t __le32, __be32;
++typedef uint64_t __le64, __be64;
++typedef int __kernel_clockid_t;
++#endif
+--- /dev/null
++++ freebsd-build.sh
+@@ -0,0 +1,27 @@
++#!/bin/sh
++# Build the RAW-CAN can-utils tools on FreeBSD against the netcan stack.
++# Requires: libepoll-shim (pkg), the netcan kernel module (can.ko) for runtime.
++set -e
++cd "$(dirname "$0")"
++CC=${CC:-cc}
++CF="-O2 -Wall -Iinclude -Icompat -include $PWD/compat/compat.h -I/usr/local/include/libepoll-shim"
++LD="-L/usr/local/lib -lepoll-shim"
++
++$CC $CF -c lib.c -o lib.o
++$CC $CF -c canframelen.c -o canframelen.o
++
++# RAW(CAN_RAW)-only tools. Protocol tools (isotp*/j1939*/bcm*/cangw/slcan*)
++# need kernel protocols not present on FreeBSD and are intentionally skipped.
++TOOLS="cansend candump cangen canplayer cansniffer canbusload canlogserver \
++       canerrsim canfdtest asc2log log2asc canmakelog canframelentest canlogtest"
++ok=""; fail=""
++for t in $TOOLS; do
++	[ -f "$t.c" ] || continue
++	if $CC $CF -o "$t" "$t.c" lib.o canframelen.o $LD 2>"/tmp/$t.buildlog"; then
++		ok="$ok $t"
++	else
++		fail="$fail $t"
++	fi
++done
++echo "BUILT:$ok"
++echo "SKIPPED/FAILED:$fail"
+--- include/linux/can.h
++++ include/linux/can.h
+@@ -253,7 +253,8 @@ typedef unsigned short __kernel_sa_family_t;
+  * @can_addr:    protocol specific address information
+  */
+ struct sockaddr_can {
+-	__kernel_sa_family_t can_family;
++	__u8 can_len; /* FreeBSD sa_len */
++	__u8 can_family; /* FreeBSD: 1-byte sa_family_t */
+ 	int         can_ifindex;
+ 	union {
+ 		/* transport protocol class address information (e.g. ISOTP) */
