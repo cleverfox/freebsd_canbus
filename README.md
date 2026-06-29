@@ -34,6 +34,7 @@ overlays/   device-tree overlays (MCP2515 driver / spigen tool)
 release/    release(7) board config (SOQUARTZ.conf), upstreaming reference
 ports/      FreeBSD ports: u-boot-soquartz-model-a, can-utils (upstream + netcan patch)
 tools/      mcp2515 spigen userspace bring-up tool
+photos/     wiring / board-modification photos
 ```
 
 ---
@@ -117,7 +118,8 @@ sudo dd if=soquartz-freebsd-arm64.img of=/dev/diskN bs=4m
 ```
 - Use a **good-quality** microSD. A marginal card shows up as a U-Boot
   `Card did not respond to voltage select! : -110` and a hang at the loader.
-- Console: 3.3 V USB-serial on the debug UART, **1500000 8N1**.
+- Console: 3.3 V USB-serial on the debug UART, **1500000 8N1** available on
+  40-pin header: 6-GND, 8-TX (out), 10-RX (in).
 - It **autoboots** (no manual U-Boot interaction) and you log in as **`root`
   with an empty password** (just Enter). Set one with `passwd`.
 - DHCP + sshd are on. To grow the rootfs to the card: it auto-`growfs`es; if the
@@ -133,21 +135,85 @@ ifconfig vcan0 create up           # virtual CAN loopback
 
 ## 4. Scenario A — MCP2515 (in-kernel SPI driver → `can0`)
 
-### Wiring (SOQuartz Model A 40-pin header, SPI3 "M0" pins)
-Run the MCP2515 at **3.3 V** with an **8 MHz crystal** (see
-`tools/mcp2515/README.md` for the 3.3 V mod and transceiver level notes; 500
-kbit/s is the 8 MHz ceiling).
+### Board modification (REQUIRED)
+The common AliExpress "MCP2515 CAN module" carries an **MCP2515** controller and a
+**TJA1050** transceiver sharing **one 5 V rail**. The TJA1050 is **5 V-only**
+(4.75–5.25 V), but the MCP2515 must run at **3.3 V** here so its SPI/INT lines are
+safe for the SOQuartz's 3.3 V GPIO (5 V exceeds the SoC I/O abs-max). Two changes
+are needed.
 
-| MCP2515 | RK3566 pin | function |
+**1) Split the power rails** — MCP2515 @ 3.3 V, TJA1050 @ 5 V:
+1. On the **bottom** of the PCB there is a single track — the **TJA1050 power
+   supply**. **Cut it** to isolate the TJA1050 VCC from the shared rail.
+2. Feed **5 V** directly to the **TJA1050 power capacitor** (red wire).
+3. Power the module VCC pin — now feeding only the **MCP2515** — from **3.3 V**
+   (orange wire).
+
+![TJA1050 power track to cut — bottom of PCB](photos/fix_tja1050_0.jpg)
+![after cutting / 5 V fed to the TJA1050 cap](photos/fix_tja1050_1.jpg)
+
+**2) Current-limit the transceiver's receive output.** TJA1050 **pin 4** (its
+data output to the controller — RXD) swings **0–5 V**, but it drives the
+MCP2515 **RXCAN** input, which now runs at 3.3 V; 5 V exceeds its abs-max. Put a
+**100 Ω** resistor in series on that line to limit current into the MCP2515's
+input clamp. One way (used here): desolder TJA1050 **pin 4**, bend it up, and
+mount a vertical **0402 100 Ω** between the track and the pin. Alternatively,
+**cut the track and solder the resistor across the cut**.
+
+![100 Ω series resistor on TJA1050 pin 4 (RXD) -> MCP2515 RXCAN](photos/fix_tja1050_2.jpg)
+
+Result: MCP2515 @ 3.3 V (logic-compatible with the SOQuartz), TJA1050 @ 5 V (bus),
+and the one 5 V→3.3 V signal current-limited. (More background in
+`tools/mcp2515/README.md`.)
+
+**Alternative 1 — swap in a 3.3 V transceiver (simplest).** Instead of both
+changes above, replace the 5 V TJA1050 with a **3.3 V** CAN transceiver — the TI
+**SN65HVD230** is pin-compatible (same SO8 footprint: D/GND/VCC/R/Vref/CANL/CANH/
+RS). Desolder the TJA1050 and fit the SN65HVD230 in its place; the whole module
+then runs from the single **3.3 V** rail (controller + transceiver), so there's
+**no track to cut, no 5 V rail, and no series resistor** — every logic line is
+3.3 V end to end. (SN65HVD230 breakout modules are also sold standalone if you'd
+rather keep the controller and transceiver as separate boards.)
+
+**Alternative 2 — level-shift SPI/INT, leave the board at 5 V (no board mod).**
+Power the **unmodified** module entirely from **5 V** (MCP2515 + TJA1050 both at
+5 V), and put a **TXS0108E** 8-bit bidirectional level translator between it and
+the SOQuartz:
+- **VccA = 3.3 V** (SOQuartz side, the low-voltage bus), **VccB = 5 V** (module
+  side, the high-voltage bus). This **A = low / B = high** orientation is
+  mandatory — wiring it backwards won't translate correctly.
+- Route the five digital lines through it — **SCK, MOSI, MISO, CS, INT** —
+  A-side to the SOQuartz GPIO (pins in the table above), B-side to the matching
+  MCP2515-module pins. (CANH/CANL are unaffected — analog bus side.)
+- Tie **OE** high (to VccA via a pull-up) to enable the outputs; common **GND**
+  for both sides.
+
+The TXS0108E auto-senses direction per channel, so it handles the mixed SPI
+directions (SCK/MOSI/CS out, MISO/INT in) without strapping. Keep the SPI clock
+moderate — its auto-direction is happiest with push-pull SPI at a few MHz; if you
+see SPI glitches, lower `spi-max-frequency` in the overlay (the MCP2515 tops out
+at 10 MHz, and CAN bitrate is independent of SPI clock).
+
+### Wiring (SOQuartz Model A 40-pin header, SPI3 "M0" pins)
+8 MHz crystal; 500 kbit/s is the 8 MHz ceiling.
+
+| MCP2515 module | SOQuartz (MB pin) | function |
 |---|---|---|
-| SCK | GPIO4_B3 | spi3 clk |
-| SI  | GPIO4_B2 | spi3 mosi |
-| SO  | GPIO4_B0 | spi3 miso |
-| CS  | GPIO4_A6 | spi3 cs0 |
-| INT | GPIO4_B1 | GPIO interrupt (level-low) |
-| VCC | 3.3 V | |
-| GND | GND | |
-| CANH/CANL | to the CAN bus | via the transceiver |
+| SCK | GPIO4_B3 (23) | spi3 clk |
+| SI  | GPIO4_B2 (19)| spi3 mosi |
+| SO  | GPIO4_B0 (21) | spi3 miso |
+| CS  | GPIO4_A6 (24) | spi3 cs0 |
+| INT | GPIO4_B1 (22) | GPIO interrupt (level-low) |
+| VCC (MCP2515) | **3.3 V** (17 - orange wire on photos) | controller power |
+| TJA1050 cap | **5 V** (2 - red wire on photos) | transceiver power (post-mod) |
+| GND | GND (20) | common ground |
+
+Full bench setup — SOQuartz on its baseboard, the modified MCP2515 board, 3.3 V
+(orange) to the MCP2515 and 5 V (red) to the TJA1050, and a second CAN node on a
+**WeAct CAN485 ESP32** (running [espcan_br](https://github.com/cleverfox/espcan_br),
+Scenario B):
+
+![SOQuartz + modified MCP2515 + WeAct CAN485 bench setup](photos/soquartz_tja1050.jpg)
 
 ### It's already enabled
 The image ships `mcp2515_load="YES"` and
@@ -206,7 +272,7 @@ FreeBSD side.
 > itself over mDNS as `espcan-br`, and the UART baud is configurable there). The
 > SLCAN TCP server (:2000) runs on both the AP and the station IP. For an
 > outbound (NAT-friendly) client connection, set a `tcp://host:port/` URL on that
-> page. (Ignore the firmware's `tls://` option — that's for a different project.)
+> page.
 
 `slcand` usage (FreeBSD, from the canbus branch):
 ```
@@ -307,13 +373,5 @@ build entry), the `release/arm64/SOQUARTZ.conf` board config, and the
 
 ## 8. Known issues / TODO
 
-- **eMMC boot doesn't work yet.** The image boots from microSD; on the SoM eMMC
-  the kernel can't enumerate it (`mmc1: CMD3 failed`) because FreeBSD's
-  `rk3568_cru` driver can't set the `cclk_emmc` clock. SD is the supported boot
-  medium for now.
 - **MCP2515 driver** is classic-CAN only (no CAN FD), single TX buffer, bitrate
-  via sysctl (no netlink bit-timing / bus-off restart yet); the attach
-  error-path cleanup needs hardening before upstreaming.
-- **Marginal microSD cards** fail U-Boot's SD re-init (`-110`) intermittently —
-  use a known-good card.
-
+  via sysctl (no netlink bit-timing / bus-off restart yet)
