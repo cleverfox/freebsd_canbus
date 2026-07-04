@@ -195,7 +195,17 @@ see SPI glitches, lower `spi-max-frequency` in the overlay (the MCP2515 tops out
 at 10 MHz, and CAN bitrate is independent of SPI clock).
 
 ### Wiring (SOQuartz Model A 40-pin header, SPI3 "M0" pins)
-8 MHz crystal; 500 kbit/s is the 8 MHz ceiling.
+The stock module carries an **8 MHz** crystal; **500 kbit/s is the 8 MHz
+ceiling** (1 Mbit/s needs ≥5 TQ/bit, and 8 MHz yields only 4 — no valid
+timing exists).
+
+**Optional crystal upgrade — 1 Mbit/s.** Replace the module's 8 MHz quartz
+with a **16 MHz** or **24 MHz** one and change the overlay to match —
+`clock-frequency = <16000000>` (or `<24000000>`) in
+`overlays/rk3566-soquartz-mcp2515-can.dtso` (rebuild the `.dtbo`, see the
+overlay header). The driver picks the bit-timing table from the FDT
+`clock-frequency`, so the full range up to **1 Mbit/s** (the classic-CAN
+maximum) becomes available. Both crystals are verified working on this setup.
 
 | MCP2515 module | SOQuartz (MB pin) | function |
 |---|---|---|
@@ -228,7 +238,8 @@ is absent — no panic.
 
 ### Configure the bitrate (live)
 ```sh
-sysctl dev.mcp2515.0.bitrate=125   # 100 | 125 | 250 | 500 (8 MHz table)
+sysctl dev.mcp2515.0.bitrate=125   # 100 | 125 | 250 | 500 (8 MHz crystal)
+                                   # with the 16/24 MHz crystal mod: up to 1000
 ```
 It reprograms the controller immediately (cycles config→normal). Persist across
 reboots in `/etc/sysctl.conf`:
