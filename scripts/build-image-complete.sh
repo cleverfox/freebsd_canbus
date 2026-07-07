@@ -26,9 +26,14 @@ REPO=$(cd "$SELF/.." && pwd)               # <repo>
 JOBS=$(sysctl -n hw.ncpu)
 MK="env MAKEOBJDIRPREFIX=$HOME/obj __MAKE_CONF=/dev/null SRCCONF=/dev/null"
 
-# repo-relative inputs consumed by mk-image.sh
-export MCP2515_OVERLAY="$REPO/overlays/rk3566-soquartz-mcp2515-can.dtso"
-export MCP2515_SRC="$REPO/tools/mcp2515/mcp2515_spigen.c"
+# repo-relative inputs consumed by mk-image.sh. Defaults bake in the MCP2515
+# (classic CAN) overlay; for an MCP2518FD (CAN FD) module run instead:
+#   env CAN_DRIVER=mcp251xfd \
+#       MCP2515_OVERLAY=$REPO/overlays/rk3566-soquartz-mcp2518fd-can.dtso \
+#       sh scripts/build-image-complete.sh
+export MCP2515_OVERLAY="${MCP2515_OVERLAY:-$REPO/overlays/rk3566-soquartz-mcp2515-can.dtso}"
+export MCP2515_SRC="${MCP2515_SRC:-$REPO/tools/mcp2515/mcp2515_spigen.c}"
+export CAN_DRIVER="${CAN_DRIVER:-mcp2515}"
 
 echo "=== [1/4] build SOQuartz U-Boot ==="
 sh "$SELF/build-uboot.sh" 2>&1 | tail -3

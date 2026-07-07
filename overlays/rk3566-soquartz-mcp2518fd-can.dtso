@@ -1,0 +1,42 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * SOQuartz Model A: MCP2518FD (CAN FD, SPI) on SPI3 CS0, for the in-kernel
+ * mcp251xfd(4) driver -> creates a canN interface.
+ *
+ * Same wiring as the mcp2515 overlays (SPI3 M0 pinmux):
+ *   CLK=GPIO4_B3  MISO=GPIO4_B0  MOSI=GPIO4_B2  CS0=GPIO4_A6  INT=GPIO4_B1
+ *
+ * The driver defaults to classic CAN 2.0 mode; switch to CAN FD via MTU:
+ *   ifconfig can0 mtu 72 up
+ *   sysctl dev.mcp251xfd.0.bitrate=500 dev.mcp251xfd.0.dbitrate=2000
+ *
+ * clock-frequency MUST match the module's crystal (most MCP2518FD boards:
+ * 40 MHz). Do NOT load together with the mcp2515 or spigen overlays (all
+ * claim SPI3 CS0).
+ *
+ * Build on the board:
+ *   dtc -@ -I dts -O dtb \
+ *       -o /boot/dtb/overlays/rk3566-soquartz-mcp2518fd-can.dtbo \
+ *       rk3566-soquartz-mcp2518fd-can.dtso
+ * loader.conf:
+ *   fdt_overlays="rk3566-soquartz-mcp2518fd-can.dtbo"
+ *   mcp251xfd_load="YES"
+ *   can_load="YES"
+ */
+
+&spi3 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	mcp2518fd@0 {
+		compatible = "microchip,mcp2518fd";
+		reg = <0>;				/* CS0 */
+		spi-max-frequency = <10000000>;
+		interrupt-parent = <&gpio4>;
+		interrupts = <9 2>;			/* GPIO4_B1, edge-falling */
+		clock-frequency = <40000000>;		/* 40 MHz -- MATCH YOUR MODULE */
+	};
+};

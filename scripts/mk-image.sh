@@ -28,6 +28,10 @@ set -eu
 : "${OVERLAY:=$HOME/soquartz/files}"      # optional drop-in etc/boot files
 : "${MCP2515_SRC:=$HOME/mcp2515/mcp2515_spigen.c}"  # bring-up tool source (optional)
 : "${MCP2515_OVERLAY:=$HOME/soquartz/overlays/rk3566-soquartz-mcp2515-can.dtso}"  # CAN driver overlay (optional)
+# kernel driver to autoload for the overlay above: mcp2515 (classic CAN) or
+# mcp251xfd (MCP2517/2518FD, CAN FD) -- must match the overlay's compatible
+: "${CAN_DRIVER:=mcp2515}"
+CAN_DTBO="$(basename "$MCP2515_OVERLAY" .dtso).dtbo"
 
 KERNCONF=GENERIC
 TARGET=arm64
@@ -86,11 +90,11 @@ comconsole_speed="$CONSOLE_SPEED"
 # SocketCAN (PF_CAN) -- loadable module, GENERIC kernel
 can_load="YES"
 
-# MCP2515 classic-CAN controller on SPI3 CS0 -> can0 (driver auto-loads can.ko).
-# The overlay enables SPI3 + the mcp2515 node; if no chip is wired the driver
-# just fails to attach ("MCP2515 not responding"), no panic.
-mcp2515_load="YES"
-fdt_overlays="rk3566-soquartz-mcp2515-can.dtbo"
+# Microchip CAN controller on SPI3 CS0 -> can0 (driver auto-loads can.ko).
+# The overlay enables SPI3 + the controller node; if no chip is wired the
+# driver just fails to attach, no panic.
+${CAN_DRIVER}_load="YES"
+fdt_overlays="$CAN_DTBO"
 
 # Force the SOQuartz Model A device tree (overrides U-Boot's EFI FDT)
 dtbfile_load="YES"
@@ -123,6 +127,10 @@ sudo mkdir -p "$DESTDIR/usr/local/bin"
 if [ -f "$MCP2515_SRC" ]; then
 	say "cross-compiling mcp2515 bring-up tool"
 	XCC="$OBJ$SRC/$TARGET.$TARGET_ARCH/tmp/usr/bin/cc"
+	# native build host (host arch == target): no cross cc in tmp, host cc is fine
+	if [ ! -x "$XCC" ] && [ "$(uname -p)" = "$TARGET_ARCH" ]; then
+		XCC=/usr/bin/cc
+	fi
 	if [ -x "$XCC" ]; then
 		"$XCC" -O2 -Wall -o /tmp/mcp2515 "$MCP2515_SRC" \
 			&& sudo install -m 0755 /tmp/mcp2515 "$DESTDIR/usr/local/bin/mcp2515" \
@@ -139,11 +147,10 @@ fi
 # fdt_overlays in loader.conf). Label-based (&spi3/&gpio4); the base DTB is
 # built with `dtc -@` so the loader resolves the fixups at boot.
 if [ -f "$MCP2515_OVERLAY" ]; then
-	say "compiling mcp2515 CAN overlay"
+	say "compiling CAN overlay $CAN_DTBO"
 	sudo mkdir -p "$DESTDIR/boot/dtb/overlays"
-	dtc -@ -I dts -O dtb -o /tmp/mcp2515-can.dtbo "$MCP2515_OVERLAY"
-	sudo cp /tmp/mcp2515-can.dtbo \
-		"$DESTDIR/boot/dtb/overlays/rk3566-soquartz-mcp2515-can.dtbo"
+	dtc -@ -I dts -O dtb -o "/tmp/$CAN_DTBO" "$MCP2515_OVERLAY"
+	sudo cp "/tmp/$CAN_DTBO" "$DESTDIR/boot/dtb/overlays/$CAN_DTBO"
 fi
 
 # ---------------------------------------------------------------------------

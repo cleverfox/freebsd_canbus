@@ -6,7 +6,9 @@ Linux-compatible **SocketCAN (`PF_CAN` / `netcan`)** stack and **two ways to put
 real CAN frames on the wire**:
 
 - **Scenario A — MCP2515**: a Microchip MCP2515 classic-CAN controller on SPI,
-  driven by an in-kernel `mcp2515(4)` driver → a `can0` interface.
+  driven by an in-kernel `mcp2515(4)` driver → a `can0` interface. If you have
+  a Microchip **MCP2517FD/MCP2518FD** (CAN FD) module instead, the same wiring
+  works with the `mcp251xfd(4)` driver — see section 4.1.
 - **Scenario B — slcan bridge**: a serial/TCP SLCAN (Lawicel) adapter bridged
   into a `slcanN` interface by the `slcand` daemon. Reference adapter firmware:
   [espcan_br](https://github.com/cleverfox/espcan_br) for the WeAct CAN485
@@ -22,8 +24,9 @@ Both expose standard `AF_CAN` `SOCK_RAW` sockets, so `can-utils`
 - **FreeBSD tree:** <https://github.com/cleverfox/freebsd-src> branch **`canbus`**
   — the `netcan` PF_CAN stack, `slcand`, the `mcp2515(4)` driver, and the
   `rk_spi` interrupt-relay fix are all committed there.
-- **Two device-tree changes** are *not* in the branch yet and must be applied
-  from `patches/` (see below).
+- **Two device-tree changes** are *not* in the branch yet and live in
+  `patches/`: one required (the SOQuartz DTB build entry), one optional
+  (the SD `vmmc` fix — see section 1).
 - **This repo** carries the build tooling, device-tree overlays, the U-Boot
   port, and these docs.
 
@@ -50,8 +53,12 @@ the cross-toolchain from ports hits a `texinfo`/`perl5` issue):
 
 ```sh
 sudo pkg install -y aarch64-none-elf-gcc gsed rkbin bison flex gawk \
-    gmake pkgconf python3 swig dtc py311-pyelftools zstd
+    gmake pkgconf python3 swig dtc py311-pyelftools py311-setuptools \
+    gnutls zstd
 ```
+(`py311-setuptools` is needed by U-Boot's pylibfdt build, `gnutls` by its
+`mkeficapsule` tool.) A native **arm64** FreeBSD builder works too, with the
+exact same commands.
 (`makefs`, `mkimg`, `gpart`, `mdconfig`, `newfs_msdos` are in the base system.)
 
 ### Get the sources on the build host
@@ -59,8 +66,9 @@ sudo pkg install -y aarch64-none-elf-gcc gsed rkbin bison flex gawk \
 # FreeBSD tree + patches
 git clone -b canbus https://github.com/cleverfox/freebsd-src.git ~/src
 cd ~/src
-git apply /path/to/this-repo/patches/0001-soquartz-model-a-sd-vmmc-supply.patch
 git apply /path/to/this-repo/patches/0002-build-soquartz-model-a-dtb.patch
+# optional -- only if U-Boot can't power your microSD (see note below):
+#git apply /path/to/this-repo/patches/0001-soquartz-model-a-sd-vmmc-supply.patch
 
 # U-Boot 2025.04 source for the SOQuartz bootloader build
 fetch -o /tmp/u-boot-2025.04.tar.bz2 https://ftp.denx.de/pub/u-boot/u-boot-2025.04.tar.bz2
@@ -70,10 +78,15 @@ tar xf /tmp/u-boot-2025.04.tar.bz2 -C ~/ && mv ~/u-boot-2025.04 ~/ubuild
 git clone https://github.com/cleverfox/freebsd_canbus.git ~/soquartz-can   # any path; run scripts from here
 ```
 
-> The two patches fix real bugs: the SOQuartz microSD `vmmc-supply` points at a
-> *disabled* regulator (U-Boot then can't power the card — "did not respond to
-> voltage select"), and the SOQuartz Model A DTB isn't in the kernel's DTB build
-> list. Both are upstreamable.
+> Patch `0002` is required: the SOQuartz Model A DTB isn't in the kernel's DTB
+> build list, so without it no `rk3566-soquartz-model-a.dtb` gets built.
+>
+> Patch `0001` is **optional**: the SOQuartz microSD `vmmc-supply` points at a
+> *disabled* regulator, which *can* leave U-Boot unable to power the card
+> ("did not respond to voltage select! : -110"). In practice a healthy card
+> boots fine without the patch (verified end-to-end) — the -110 symptom we
+> chased turned out to be a **marginal card**. Try a good card first; apply
+> `0001` only if the symptom persists.
 
 ---
 
@@ -88,6 +101,11 @@ cd ~/src && env MAKEOBJDIRPREFIX=$HOME/obj __MAKE_CONF=/dev/null SRCCONF=/dev/nu
 
 # build everything else + assemble the image
 sh ~/soquartz-can/scripts/build-image-complete.sh
+
+# ... or, if your CAN module is an MCP2518FD (CAN FD) instead of an MCP2515:
+env CAN_DRIVER=mcp251xfd \
+    MCP2515_OVERLAY=~/soquartz-can/overlays/rk3566-soquartz-mcp2518fd-can.dtso \
+    sh ~/soquartz-can/scripts/build-image-complete.sh
 ```
 
 Output: `~/soquartz-freebsd-arm64.img` (+ `.img.zst` and `.sha256`).
@@ -258,6 +276,52 @@ cansend can0 123#DEADBEEF          # needs ≥1 other node on the bus to ACK
 
 ---
 
+## 4.1 Scenario A variant — MCP2518FD (CAN FD → `can0`)
+
+If your SPI module carries a Microchip **MCP2517FD/MCP2518FD** instead of an
+MCP2515, use the in-kernel **`mcp251xfd(4)`** driver (also in the `canbus`
+branch; `mcp251xfd.ko` ships in the image) with the
+`overlays/rk3566-soquartz-mcp2518fd-can.dtso` overlay. You get CAN FD on top
+of classic CAN.
+
+- **Wiring is identical** to the MCP2515 table in section 4 (SPI3 "M0" pins,
+  INT on GPIO4_B1). The same 3.3 V logic rules apply: the MCP251xFD runs
+  happily at 3.3 V, so power the controller at 3.3 V and treat a 5 V-only
+  transceiver exactly as described in section 4.
+- **Crystal**: the overlay assumes the usual **40 MHz** module crystal
+  (`clock-frequency = <40000000>`); edit it to match your board. With 40 MHz
+  the full classic range plus CAN FD data rates are available — no crystal
+  ceiling like the MCP2515's 8 MHz part.
+
+**Build the image for it** (instead of the default MCP2515 one, section 2):
+```sh
+env CAN_DRIVER=mcp251xfd \
+    MCP2515_OVERLAY=~/soquartz-can/overlays/rk3566-soquartz-mcp2518fd-can.dtso \
+    sh ~/soquartz-can/scripts/build-image-complete.sh
+```
+
+**Or switch an already-flashed MCP2515 image over, on the board:**
+```sh
+dtc -@ -I dts -O dtb -o /boot/dtb/overlays/rk3566-soquartz-mcp2518fd-can.dtbo \
+    rk3566-soquartz-mcp2518fd-can.dtso
+# /boot/loader.conf: replace the mcp2515 lines with
+#   mcp251xfd_load="YES"
+#   fdt_overlays="rk3566-soquartz-mcp2518fd-can.dtbo"
+```
+Never list both overlays in `fdt_overlays` (mcp2515, mcp2518fd, and the spigen
+overlay all claim SPI3 CS0).
+
+**Bitrate / CAN FD.** The driver comes up in classic-CAN mode at 500 kbit/s;
+`cansend`/`candump` work as in section 4. Rates are sysctls:
+```sh
+sysctl dev.mcp251xfd.0.bitrate=500     # arbitration/classic bitrate (kbit/s)
+sysctl dev.mcp251xfd.0.dbitrate=2000   # CAN FD data-phase bitrate (kbit/s)
+ifconfig can0 mtu 72 up                # MTU 72 = CANFD_MTU -> enables FD frames
+```
+Both ends of the bus must agree on the bitrates (and FD-capability) as usual.
+
+---
+
 ## 5. Scenario B — slcan bridge (serial / TCP → `slcanN`)
 
 FreeBSD has no `N_SLCAN` line discipline, so `slcand` (in the canbus branch,
@@ -371,18 +435,19 @@ The FreeBSD-side work, for reference / upstreaming:
   `can_if_output`, `vcan`/`cantap`, BPF (`DLT_CAN_SOCKETCAN`).
 - **`usr.sbin/slcand`** — the serial/TCP SLCAN bridge daemon + rc.d service.
 - **`sys/dev/mcp2515/if_mcp2515.c`** — the MCP2515 driver (classic CAN).
+- **`sys/dev/mcp251xfd/`** — the MCP2517FD/MCP2518FD driver (CAN FD).
 - **`rk_spi` fix** — added bus resource-relay methods so an SPI child can
   allocate its FDT GPIO interrupt (needed by any IRQ-driven SPI device on
   Rockchip, not just CAN).
 - Build wiring for the CAN module + headers; ATF tests for `CAN_RAW`.
 
-Plus the two device-tree patches in `patches/` (SD `vmmc` fix + SOQuartz DTB
-build entry), the `release/arm64/SOQUARTZ.conf` board config, and the
+Plus the two device-tree patches in `patches/` (the required SOQuartz DTB
+build entry + the optional SD `vmmc` fix, see section 1), the
+`release/arm64/SOQUARTZ.conf` board config, and the
 `sysutils/u-boot-soquartz-model-a` port.
 
 ---
 
 ## 8. Known issues / TODO
 
-- **MCP2515 driver** is classic-CAN only (no CAN FD), single TX buffer, bitrate
-  via sysctl (no netlink bit-timing / bus-off restart yet)
+- bitrate via sysctl (no netlink bit-timing / bus-off restart yet)
